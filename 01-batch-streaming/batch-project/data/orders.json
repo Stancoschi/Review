@@ -1,0 +1,45 @@
+[
+  {
+    "order_id": 1,
+    "customer": {
+      "id": 101,
+      "name": "Ana"
+    },
+    "items": [
+      {
+        "sku": "B-1",
+        "qty": 2
+      },
+      {
+        "sku": "B-2",
+        "qty": 1
+      }
+    ]
+  },
+  {
+    "order_id": 2,
+    "customer": {
+      "id": 102,
+      "name": "Dan"
+    },
+    "items": [
+      {
+        "sku": "T-9",
+        "qty": 3
+      }
+    ]
+  },
+  {
+    "order_id": 7,
+    "customer": {
+      "id": 105,
+      "name": "Ion"
+    },
+    "items": [
+      {
+        "sku": "H-4",
+        "qty": 1
+      }
+    ]
+  }
+]

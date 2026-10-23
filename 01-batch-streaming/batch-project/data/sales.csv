@@ -1,0 +1,9 @@
+order_id,customer_id,category,amount
+1,101,books,25.50
+2,102,toys,40.00
+3,101,books,15.00
+4,103,games,-10.00
+5,,toys,12.00
+6,104,games,
+7,105,tools,80.25
+8,102,toys,19.99

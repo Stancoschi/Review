@@ -1,0 +1,80 @@
+NOTITE PERSONALE - CE FACE FIECARE FISIER
+
+Am facut doua proiecte mici: unul de batch (Spark) si unul de streaming (Kafka + Spark).
+Le tin minte asa: batch = citesc fisiere, curat, agreg, scriu. Streaming = datele vin continuu prin Kafka.
+
+
+=== PROIECTUL BATCH (batch-project) ===
+
+batch_job.py
+  Jobul principal. Citeste sales.csv, orders.json si customers.db, scoate randurile gresite
+  (suma lipsa/negativa, client lipsa) intr-un folder out/quarantine, face join cu clientii,
+  aduna vanzarile pe oras si categorie si scrie Parquet in out/. Daca crapa, scrie eroarea in log
+  si iese cu cod 1.
+
+rdd_example.py
+  Aceeasi idee dar cu RDD-uri: filter, map, reduceByKey. E pentru task-ul cu colectii distribuite.
+
+test_batch_job.py
+  Trei teste pytest: randurile gresite ajung in quarantine, JSON-ul imbricat se aplatizeaza,
+  jobul complet da 8 randuri citite, 5 valide, 3 respinse.
+
+data/sales.csv, data/orders.json, data/customers.db
+  Datele de test. Le-am facut mici, cu 3 randuri gresite pe care le prind validarile.
+
+requirements.txt
+  pyspark si pytest.
+
+README.md
+  Descrierea proiectului, parametrii, cron si cum il rulez.
+
+
+=== PROIECTUL DE STREAMING (streaming-project) ===
+
+producer.py
+  Trimite comenzi false in topicul "orders" si plati (la comenzile pare) in "payments".
+  Fiecare a 10-a comanda are suma -1 pe care o pun intentionat ca sa o filtrez.
+  Atentie: numerotarea comenzilor porneste mereu de la 1.
+
+consumer.py
+  Citeste un topic si afiseaza partitia, offsetul si mesajul. Primeste ca argumente topicul si grupul.
+  Il folosesc pentru partea de baza cu broker-ul (publish si consume).
+
+stream_job.py
+  Jobul Spark Structured Streaming, cu trei moduri:
+    stateless - parsez JSON-ul, filtrez sumele negative, pastrez cateva coloane
+    windowed  - total si numar de comenzi pe client in ferestre de 1 minut, cu watermark
+    joined    - join intre comenzi si plati (stream-stream), in 5 minute
+  Citirea din Kafka se face in read_topic(), scrierea e in consola.
+
+sqlite_sink.py
+  Sink-ul meu: scrie fiecare micro-batch intr-un tabel SQLite. Tin minte ce batch-uri am scris
+  deja, ca daca Spark reia un batch dupa o oprire sa nu bage duplicate. Comenzile cu acelasi
+  order_id se suprascriu (de-aia am avut 54 de randuri scrise dar 27 in tabel).
+
+tuning/perf_test.sh
+  Ruleaza acelasi test de producator cu setari diferite (batch.size, linger.ms, compresie, acks,
+  3 partitii) si salveaza rezultatul in tuning/results.txt.
+
+tuning/NOTES.md
+  Tabelul cu cifrele din teste (il completez eu cu rezultatele reale) si ce am schimbat si de ce.
+
+requirements.txt, README.md
+  pyspark 4.0.0, kafka-python, pytest. README-ul explica cum pornesc Kafka si joburile.
+
+
+=== COMENZI IMPORTANTE (de tinut minte) ===
+
+Kafka:     cd ~/kafka ; bin/kafka-server-start.sh config/server.properties
+Topicuri:  bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+Spark cu Kafka: spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0 stream_job.py <mod>
+  (nu cu python simplu, ca nu gaseste sursa kafka)
+Intre rulari de demo sterg checkpoints/ ; la proba de reluare a sink-ului NU il sterg.
+Proba de reluare: python producer.py 40 0.2 -> count trebuie sa creasca de la 27 la 36.
+
+
+=== LIMITE (ca sa stiu ce raspund daca ma intreaba) ===
+
+- Totul ruleaza pe un singur calculator, cu un singur broker Kafka, deci nu am scalat brokere.
+- Sink-ul e facut cu foreachBatch, nu e un conector Kafka Connect.
+- Datele Kafka sunt in /tmp, deci dispar la restart.
