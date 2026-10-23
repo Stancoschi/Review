@@ -1,0 +1,8 @@
+order_id,customer_id,category,amount,date
+1,101,Books,"25,50 lei",2026-10-01
+2,102,toys,40.00,02.10.2026
+3,101,books,15,03/10/2026
+4,103,Games,-10,2026-10-04
+5,104,toys,abc,2026-10-05
+6,105,tools,80.25,not a date
+7,102,TOYS,19.99,2026-10-07
