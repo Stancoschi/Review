@@ -1,80 +1,118 @@
-NOTITE PERSONALE - CE FACE FIECARE FISIER
+NOTITE PERSONALE - REFERINTA RAPIDA
 
-Am facut doua proiecte mici: unul de batch (Spark) si unul de streaming (Kafka + Spark).
-Le tin minte asa: batch = citesc fisiere, curat, agreg, scriu. Streaming = datele vin continuu prin Kafka.
-
-
-=== PROIECTUL BATCH (batch-project) ===
-
-batch_job.py
-  Jobul principal. Citeste sales.csv, orders.json si customers.db, scoate randurile gresite
-  (suma lipsa/negativa, client lipsa) intr-un folder out/quarantine, face join cu clientii,
-  aduna vanzarile pe oras si categorie si scrie Parquet in out/. Daca crapa, scrie eroarea in log
-  si iese cu cod 1.
-
-rdd_example.py
-  Aceeasi idee dar cu RDD-uri: filter, map, reduceByKey. E pentru task-ul cu colectii distribuite.
-
-test_batch_job.py
-  Trei teste pytest: randurile gresite ajung in quarantine, JSON-ul imbricat se aplatizeaza,
-  jobul complet da 8 randuri citite, 5 valide, 3 respinse.
-
-data/sales.csv, data/orders.json, data/customers.db
-  Datele de test. Le-am facut mici, cu 3 randuri gresite pe care le prind validarile.
-
-requirements.txt
-  pyspark si pytest.
-
-README.md
-  Descrierea proiectului, parametrii, cron si cum il rulez.
+Doua proiecte mici: batch (Spark) si streaming (Kafka + Spark).
+Batch = citesc fisiere, curat, agreg, scriu. Streaming = datele vin continuu prin Kafka.
+Locatie: ~/Downloads/Review/01-batch-streaming/{batch-project,streaming-project}
+GitHub: https://github.com/Stancoschi/Review
 
 
-=== PROIECTUL DE STREAMING (streaming-project) ===
+############ 1. TASK -> FISIER (ce raspund daca ma intreaba) ############
 
-producer.py
-  Trimite comenzi false in topicul "orders" si plati (la comenzile pare) in "payments".
-  Fiecare a 10-a comanda are suma -1 pe care o pun intentionat ca sa o filtrez.
-  Atentie: numerotarea comenzilor porneste mereu de la 1.
+JUNIOR - BATCH
+  Colectii distribuite in Spark ........ rdd_example.py (filter, map, reduceByKey) + DataFrame-uri in batch_job.py
+  Aplicatie Spark simpla ............... batch_job.py (citeste, transforma, scrie Parquet)
+  Citire structurat/semi-structurat .... batch_job.py: CSV, JSON imbricat (explode), SQLite (driver sqlite3)
+  Spark in cluster mode ................ spark-submit --master spark://localhost:7077 + Spark UI pe 8080
+  Gestionare erori ..................... split_valid() -> out/quarantine cu motivul; try/except + log + exit code 1
 
-consumer.py
-  Citeste un topic si afiseaza partitia, offsetul si mesajul. Primeste ca argumente topicul si grupul.
-  Il folosesc pentru partea de baza cu broker-ul (publish si consume).
+JUNIOR - STREAMING
+  Message broker (publish/consume) ..... producer.py + consumer.py + Kafka pornit local
+  Read/write APIs streaming ............ stream_job.py: readStream.format("kafka") si writeStream (read_topic())
+  Operatii de stream processing ........ stream_job.py: stateless (filter, proiectie), windowed (agregare pe ferestre
+                                         + watermark), joined (join stream-stream comenzi + plati)
 
-stream_job.py
-  Jobul Spark Structured Streaming, cu trei moduri:
-    stateless - parsez JSON-ul, filtrez sumele negative, pastrez cateva coloane
-    windowed  - total si numar de comenzi pe client in ferestre de 1 minut, cu watermark
-    joined    - join intre comenzi si plati (stream-stream), in 5 minute
-  Citirea din Kafka se face in read_topic(), scrierea e in consola.
-
-sqlite_sink.py
-  Sink-ul meu: scrie fiecare micro-batch intr-un tabel SQLite. Tin minte ce batch-uri am scris
-  deja, ca daca Spark reia un batch dupa o oprire sa nu bage duplicate. Comenzile cu acelasi
-  order_id se suprascriu (de-aia am avut 54 de randuri scrise dar 27 in tabel).
-
-tuning/perf_test.sh
-  Ruleaza acelasi test de producator cu setari diferite (batch.size, linger.ms, compresie, acks,
-  3 partitii) si salveaza rezultatul in tuning/results.txt.
-
-tuning/NOTES.md
-  Tabelul cu cifrele din teste (il completez eu cu rezultatele reale) si ce am schimbat si de ce.
-
-requirements.txt, README.md
-  pyspark 4.0.0, kafka-python, pytest. README-ul explica cum pornesc Kafka si joburile.
+MIDDLE
+  Citire din surse multiple ............ batch_job.py (CSV + JSON imbricat + SQLite)
+  Broker avansat (tuning, scalare) ..... tuning/perf_test.sh + tuning/NOTES.md
+  API-uri streaming / conector custom .. sqlite_sink.py (sink propriu cu foreachBatch)
 
 
-=== COMENZI IMPORTANTE (de tinut minte) ===
+############ 2. ORDINEA COMENZILOR ############
 
-Kafka:     cd ~/kafka ; bin/kafka-server-start.sh config/server.properties
-Topicuri:  bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
-Spark cu Kafka: spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0 stream_job.py <mod>
-  (nu cu python simplu, ca nu gaseste sursa kafka)
-Intre rulari de demo sterg checkpoints/ ; la proba de reluare a sink-ului NU il sterg.
-Proba de reluare: python producer.py 40 0.2 -> count trebuie sa creasca de la 27 la 36.
+Batch:
+  cd batch-project ; source .venv/bin/activate
+  python -m pytest -v
+  spark-submit batch_job.py
+  spark-submit rdd_example.py
+  Cluster: ~/spark/sbin/start-master.sh ; ~/spark/sbin/start-worker.sh spark://localhost:7077
+           spark-submit --master spark://localhost:7077 --executor-memory 1g --total-executor-cores 2 batch_job.py
+
+Streaming (terminale separate):
+  A. cd ~/kafka ; bin/kafka-server-start.sh config/server.properties      (ramane deschis)
+     (prima data: bin/kafka-storage.sh format --standalone -t $(bin/kafka-storage.sh random-uuid) -c config/server.properties)
+  B. topicuri (o data): bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic orders --partitions 3 --replication-factor 1
+                        la fel pentru payments ; verific cu --list
+  C. python consumer.py orders
+  D. python producer.py 30 0.5
+  E. spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0 stream_job.py stateless | windowed | joined
+  F. spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.0 sqlite_sink.py
+  G. KAFKA_HOME=~/kafka bash tuning/perf_test.sh ; cat tuning/results.txt
+
+Regula: intre demo-uri sterg checkpoints/ . NU il sterg la proba de reluare a sink-ului.
 
 
-=== LIMITE (ca sa stiu ce raspund daca ma intreaba) ===
+############ 3. LUCRURI IMPORTANTE DE STIUT ############
 
-- Totul ruleaza pe un singur calculator, cu un singur broker Kafka, deci nu am scalat brokere.
-- Sink-ul e facut cu foreachBatch, nu e un conector Kafka Connect.
-- Datele Kafka sunt in /tmp, deci dispar la restart.
+- Jobul cu Kafka se porneste cu spark-submit + --packages, NU cu "python fisier.py" (altfel: "Failed to find data source: kafka").
+- Pachetul Kafka trebuie sa aiba aceeasi versiune cu pyspark (4.0.0). Prima rulare descarca pachetul, deci vrea internet.
+- Producatorul numeroteaza comenzile mereu de la 1. Daca il rulez de 2 ori, order_id se repeta.
+  De aceea in sink: 54 de randuri scrise, dar 27 in tabel (insert or replace pe order_id).
+- Proba de reluare pentru sink: count = 27 -> opresc jobul -> python producer.py 40 0.2 -> pornesc jobul FARA sa sterg
+  checkpoints -> count trebuie sa fie 36 (comenzile 31-39 sunt noi si valide, a 40-a are suma negativa).
+- Fiecare a 10-a comanda are suma -1 pe care o pun intentionat; stateless o filtreaza (de aceea un batch poate iesi gol).
+- Datele Kafka sunt in /tmp/kraft-combined-logs -> dispar la restart. Atunci: reformatez si recreez topicurile.
+- Kafka are nevoie de Java 17+. Eu am Java 21. Sunt pe Omarchy (Arch): pachete cu pacman, nu apt.
+- Arhiva Kafka care imi trebuie: kafka_2.13-4.3.1.tgz (binary). NU kafka-4.3.1-src.tgz (cod sursa).
+- Dupa tar, nu folosesc glob care prinde si arhiva: mv kafka_2.13-4.3.1 kafka  (nu kafka_2.13-4*).
+
+
+############ 4. LIMITE (sa raspund onest) ############
+
+- Tuning (perf_test.sh): schimba setarile PRODUCATORULUI si numarul de partitii, nu config/server.properties al brokerului.
+  Scalare doar pe partitii si consumatori, un singur broker. Daca vreau sa acopar mai bine: schimb num.network.threads /
+  num.io.threads in server.properties, repornesc brokerul si repet testul.
+- Tabelul din tuning/NOTES.md e gol pana rulez eu testul. Nu inventez cifre.
+- Sink-ul (sqlite_sink.py) e facut cu foreachBatch, nu e un conector Kafka Connect si acopera doar partea de sink, nu si sursa.
+- Cluster Spark: e pe un singur calculator (master + worker local), nu un cluster real.
+- Programarea batch: am doar linia cron in README, nu a rulat programat.
+- Nu am rulat toate joburile pana la capat inainte sa scriu README-urile. Verific ca README-urile sa nu spuna ceva ce n-am facut.
+
+
+############ 5. DE FACUT MAI DEPARTE ############
+
+[ ] pytest batch + spark-submit batch_job.py + rdd_example.py (capturi)
+[ ] cluster mode + un esec provocat si remediul (log + captura Spark UI)
+[ ] windowed si joined (capturi)
+[ ] proba de reluare sink (count inainte si dupa)
+[ ] perf_test.sh + completat tuning/NOTES.md cu cifre reale
+[ ] scalare consumatori: 3x python consumer.py orders scale-group + kafka-consumer-groups.sh --describe --group scale-group
+[ ] curat README-urile, apoi git push
+
+
+############ 6. GIT ############
+
+cd ~/Downloads/Review
+git init -b main ; git remote add origin https://github.com/Stancoschi/Review.git
+git pull origin main --allow-unrelated-histories     (daca repo-ul are deja ceva)
+.gitignore: .venv/ __pycache__/ .pytest_cache/ checkpoints/ out/ spark-warehouse/ metastore_db/ derby.log orders_sink.db *.log
+git add . ; git status   (verific sa nu apara .venv, checkpoints, out, orders_sink.db)
+git commit -m "Add batch and streaming projects" ; git push -u origin main
+Autentificare: token (PAT) sau gh auth login, nu parola contului.
+
+
+############ 7. CE FACE FIECARE FISIER (pe scurt) ############
+
+BATCH
+  batch_job.py        jobul principal: citeste 3 surse, scoate randurile gresite in quarantine, join cu clientii,
+                      agrega pe oras+categorie, scrie Parquet
+  rdd_example.py      acelasi gen de lucru cu RDD
+  test_batch_job.py   3 teste pytest (8 citite, 5 valide, 3 respinse)
+  data/               sales.csv, orders.json, customers.db (date de test)
+
+STREAMING
+  producer.py         trimite comenzi in "orders" si plati in "payments"
+  consumer.py         citeste un topic si afiseaza partitia, offsetul, mesajul
+  stream_job.py       Spark streaming: stateless / windowed / joined
+  sqlite_sink.py      sink propriu in SQLite, fara duplicate la reluare
+  tuning/perf_test.sh test de producator cu setari diferite -> tuning/results.txt
+  tuning/NOTES.md     tabelul cu rezultate si explicatii
